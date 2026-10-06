@@ -1,0 +1,78 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Wallet {
+  id        String     @id @default(uuid()) @db.Uuid
+  ownerId   String     @unique @map("owner_id") @db.Uuid
+  currency  String     @default("PEN")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  movements Movement[]
+
+  @@map("wallets")
+}
+
+model Movement {
+  id                   String            @id @default(uuid()) @db.Uuid
+  walletId             String            @map("wallet_id") @db.Uuid
+  wallet               Wallet            @relation(fields: [walletId], references: [id])
+  amount               Int
+  currency             String            @default("PEN")
+  direction            MovementDirection
+  type                 MovementType
+  counterpartyWalletId String?           @map("counterparty_wallet_id") @db.Uuid
+  transferId           String?           @map("transfer_id") @db.Uuid
+  reversalOf           String?           @unique @map("reversal_of") @db.Uuid
+  idempotencyKey       String?           @unique @map("idempotency_key")
+  externalReference    String?           @map("external_reference")
+  reason               String?
+  createdBy            String            @map("created_by")
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([walletId, createdAt(sort: Desc)], map: "movements_wallet_created_at_idx")
+  @@index([transferId], map: "movements_transfer_id_idx")
+  @@map("movements")
+}
+
+model IdempotencyRecord {
+  key          String   @id
+  requestHash  String   @map("request_hash")
+  statusCode   Int      @map("status_code")
+  responseBody Json     @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("idempotency_records")
+}
+
+model Outbox {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  payload     Json
+  occurredAt  DateTime  @map("occurred_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+
+  @@map("outbox")
+}
+
+enum MovementDirection {
+  CREDIT
+  DEBIT
+
+  @@map("movement_direction")
+}
+
+enum MovementType {
+  TOP_UP
+  PAYMENT
+  TRANSFER_OUT
+  TRANSFER_IN
+  REVERSAL
+
+  @@map("movement_type")
+}

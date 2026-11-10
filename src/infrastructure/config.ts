@@ -6,11 +6,12 @@ export interface AppConfig {
   jwtSecret: string;
   jwtIssuer: string;
   logLevel: string;
+  usersServiceUrl: string;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
-const REQUIRED = ['PORT', 'DATABASE_URL', 'JWT_SECRET', 'JWT_ISSUER', 'LOG_LEVEL'] as const;
+const REQUIRED = ['PORT', 'DATABASE_URL', 'JWT_SECRET', 'JWT_ISSUER', 'LOG_LEVEL', 'USERS_SERVICE_URL'] as const;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const key of REQUIRED) {
@@ -28,6 +29,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtSecret: env.JWT_SECRET as string,
     jwtIssuer: env.JWT_ISSUER as string,
     logLevel: env.LOG_LEVEL as string,
+    usersServiceUrl: (env.USERS_SERVICE_URL as string).replace(/\/$/, ''),
   };
 }
 

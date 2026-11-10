@@ -9,7 +9,7 @@ export type MovementTypeName =
 
 export interface WalletRow {
   id: string;
-  ownerId: string;
+  userId: number;
   currency: 'PEN';
   createdAt: Date;
 }
@@ -43,6 +43,7 @@ export interface OutboxEvent {
   type: string;
   occurredAt: string;
   walletId: string;
+  idUsuario?: number;
   movementId?: string;
   amount: number;
   currency: 'PEN';

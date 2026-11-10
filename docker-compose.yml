@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   billetera-api:
     build: .
@@ -27,6 +27,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       LOG_LEVEL: ${LOG_LEVEL}
+      USERS_SERVICE_URL: http://host.docker.internal:3001
     depends_on:
       postgres:
         condition: service_healthy

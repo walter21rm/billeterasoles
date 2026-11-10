@@ -10,8 +10,8 @@ import {
 export interface StoreTx {
   lockIdempotency(key: string): Promise<IdempotencyRow | null>;
   saveIdempotency(row: IdempotencyRow): Promise<void>;
-  findWalletByOwner(ownerId: string): Promise<WalletRow | null>;
-  createWallet(ownerId: string): Promise<WalletRow>;
+  findByUserId(userId: number): Promise<WalletRow | null>;
+  createWallet(userId: number): Promise<WalletRow>;
   lockWallets(ids: string[]): Promise<void>;
   balance(walletId: string): Promise<number>;
   createMovement(input: NewMovement): Promise<MovementRow>;
@@ -25,7 +25,8 @@ export abstract class WalletStore {
   abstract transaction<T>(work: (tx: StoreTx) => Promise<T>): Promise<T>;
   abstract findIdempotency(key: string): Promise<IdempotencyRow | null>;
   abstract findWallet(id: string): Promise<WalletRow | null>;
-  abstract findWalletByOwner(ownerId: string): Promise<WalletRow | null>;
+  abstract findByUserId(userId: number): Promise<WalletRow | null>;
+  abstract walletIdsForMovement(movementId: string): Promise<string[] | null>;
   abstract balance(walletId: string): Promise<number>;
   abstract walletExists(id: string): Promise<boolean>;
   abstract listMovements(query: MovementListQuery): Promise<MovementRow[]>;

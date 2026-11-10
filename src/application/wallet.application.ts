@@ -6,6 +6,7 @@ import { requestHash } from './hash';
 import { decodeCursor, encodeCursor, MovementDto, toMovementDto, toWalletDto, WalletDto } from './presenters';
 import { StoreTx, WalletStore } from './store';
 import { MovementRow } from './types';
+import { UserDirectory } from '../users/user-directory';
 
 export interface CommandResult<T> {
   status: number;
@@ -20,20 +21,25 @@ interface IdempotentCommand {
 
 @Injectable()
 export class WalletApplication {
-  constructor(private readonly store: WalletStore) {}
+  constructor(
+    private readonly store: WalletStore,
+    private readonly users: UserDirectory,
+  ) {}
 
-  open(input: IdempotentCommand & { ownerId: string }): Promise<CommandResult<WalletDto>> {
+  async open(input: IdempotentCommand & { userId: number }): Promise<CommandResult<WalletDto>> {
+    await this.users.requireActive(input.userId);
     return this.idempotent(input.idempotencyKey, input.body, async (tx) => {
-      const existing = await tx.findWalletByOwner(input.ownerId);
+      const existing = await tx.findByUserId(input.userId);
       if (existing) {
-        throw new ConflictError('El titular ya tiene una billetera');
+        throw new ConflictError('El usuario ya tiene una billetera');
       }
-      const wallet = await tx.createWallet(input.ownerId);
+      const wallet = await tx.createWallet(input.userId);
       await tx.addOutbox({
         eventId: randomUUID(),
         type: 'wallet.opened',
         occurredAt: new Date().toISOString(),
         walletId: wallet.id,
+        idUsuario: wallet.userId,
         amount: 0,
         currency: 'PEN',
       });
@@ -49,19 +55,20 @@ export class WalletApplication {
     return toWalletDto(wallet, await this.store.balance(walletId));
   }
 
-  async getByOwner(ownerId: string): Promise<WalletDto> {
-    const wallet = await this.store.findWalletByOwner(ownerId);
+  async getByOwner(userId: number): Promise<WalletDto> {
+    const wallet = await this.store.findByUserId(userId);
     if (!wallet) {
       throw new NotFoundError('Billetera no encontrada');
     }
     return toWalletDto(wallet, await this.store.balance(wallet.id));
   }
 
-  topUp(
+  async topUp(
     walletId: string,
     input: IdempotentCommand & { amount: number; currency?: string; externalReference?: string },
   ): Promise<CommandResult<MovementDto>> {
     const money = Money.fromInput(input.amount, input.currency);
+    const userId = await this.activeUser(walletId);
     return this.idempotent(input.idempotencyKey, input.body, async (tx) => {
       await tx.lockWallets([walletId]);
       const movement = await tx.createMovement({
@@ -82,6 +89,7 @@ export class WalletApplication {
         type: 'wallet.credited',
         occurredAt: new Date().toISOString(),
         walletId,
+        idUsuario: userId,
         movementId: movement.id,
         amount: money.amount,
         currency: 'PEN',
@@ -90,11 +98,12 @@ export class WalletApplication {
     });
   }
 
-  pay(
+  async pay(
     walletId: string,
     input: IdempotentCommand & { amount: number; currency?: string; externalReference?: string },
   ): Promise<CommandResult<MovementDto>> {
     const money = Money.fromInput(input.amount, input.currency);
+    const userId = await this.activeUser(walletId);
     return this.idempotent(input.idempotencyKey, input.body, async (tx) => {
       await tx.lockWallets([walletId]);
       assertCanDebit(await tx.balance(walletId), money.amount);
@@ -116,6 +125,7 @@ export class WalletApplication {
         type: 'wallet.debited',
         occurredAt: new Date().toISOString(),
         walletId,
+        idUsuario: userId,
         movementId: movement.id,
         amount: money.amount,
         currency: 'PEN',
@@ -124,7 +134,7 @@ export class WalletApplication {
     });
   }
 
-  transfer(
+  async transfer(
     input: IdempotentCommand & {
       sourceWalletId: string;
       targetWalletId: string;
@@ -137,6 +147,8 @@ export class WalletApplication {
     if (input.sourceWalletId === input.targetWalletId) {
       throw new UnprocessableError('La transferencia exige dos billeteras distintas');
     }
+    const sourceUserId = await this.activeUser(input.sourceWalletId);
+    const targetUserId = await this.activeUser(input.targetWalletId);
     return this.idempotent(input.idempotencyKey, input.body, async (tx) => {
       await tx.lockWallets([input.sourceWalletId, input.targetWalletId]);
       assertCanDebit(await tx.balance(input.sourceWalletId), money.amount);
@@ -173,6 +185,7 @@ export class WalletApplication {
         type: 'wallet.transferred',
         occurredAt: new Date().toISOString(),
         walletId: input.sourceWalletId,
+        idUsuario: sourceUserId,
         movementId: outgoing.id,
         amount: money.amount,
         currency: 'PEN',
@@ -187,10 +200,17 @@ export class WalletApplication {
     });
   }
 
-  reverse(
+  async reverse(
     movementId: string,
     input: IdempotentCommand & { reason: string },
   ): Promise<CommandResult<{ movements: MovementDto[] }>> {
+    const walletIds = await this.store.walletIdsForMovement(movementId);
+    if (!walletIds) {
+      throw new NotFoundError('Movimiento no encontrado');
+    }
+    for (const walletId of walletIds) {
+      await this.activeUser(walletId);
+    }
     return this.idempotent(input.idempotencyKey, input.body, async (tx) => {
       const movement = await tx.findMovement(movementId);
       if (!movement) {
@@ -277,6 +297,15 @@ export class WalletApplication {
       items: page.map((item) => toMovementDto(item)),
       nextCursor: hasMore && last ? encodeCursor(last.createdAt, last.id) : null,
     };
+  }
+
+  private async activeUser(walletId: string): Promise<number> {
+    const wallet = await this.store.findWallet(walletId);
+    if (!wallet) {
+      throw new NotFoundError('Billetera no encontrada');
+    }
+    await this.users.requireActive(wallet.userId);
+    return wallet.userId;
   }
 
   private async idempotent<T>(key: string, body: unknown, work: (tx: StoreTx) => Promise<T>): Promise<CommandResult<T>> {

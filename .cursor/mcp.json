@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "billetera-soles": {
+      "command": "node",
+      "args": ["mcp/server.js"]
+    }
+  }
+}

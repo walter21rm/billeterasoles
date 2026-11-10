@@ -44,9 +44,20 @@ export class PrismaWalletStore extends WalletStore {
     return row ? toWallet(row) : null;
   }
 
-  async findWalletByOwner(ownerId: string): Promise<WalletRow | null> {
-    const row = await this.prisma.wallet.findUnique({ where: { ownerId } });
+  async findByUserId(userId: number): Promise<WalletRow | null> {
+    const row = await this.prisma.wallet.findUnique({ where: { userId } });
     return row ? toWallet(row) : null;
+  }
+
+  async walletIdsForMovement(movementId: string): Promise<string[] | null> {
+    const movement = await this.prisma.movement.findUnique({ where: { id: movementId } });
+    if (!movement) return null;
+    if (!movement.transferId) return [movement.walletId];
+    const legs = await this.prisma.movement.findMany({
+      where: { transferId: movement.transferId },
+      select: { walletId: true },
+    });
+    return legs.map((leg) => leg.walletId);
   }
 
   balance(walletId: string): Promise<number> {
@@ -116,13 +127,13 @@ class PrismaStoreTx implements StoreTx {
     });
   }
 
-  async findWalletByOwner(ownerId: string): Promise<WalletRow | null> {
-    const row = await this.tx.wallet.findUnique({ where: { ownerId } });
+  async findByUserId(userId: number): Promise<WalletRow | null> {
+    const row = await this.tx.wallet.findUnique({ where: { userId } });
     return row ? toWallet(row) : null;
   }
 
-  async createWallet(ownerId: string): Promise<WalletRow> {
-    const row = await this.tx.wallet.create({ data: { ownerId, currency: 'PEN' } });
+  async createWallet(userId: number): Promise<WalletRow> {
+    const row = await this.tx.wallet.create({ data: { userId, currency: 'PEN' } });
     return toWallet(row);
   }
 
@@ -194,10 +205,10 @@ async function readBalance(client: TxClient | PrismaService, walletId: string): 
   return Number(rows[0]?.balance ?? 0);
 }
 
-function toWallet(row: { id: string; ownerId: string; currency: string; createdAt: Date }): WalletRow {
+function toWallet(row: { id: string; userId: number; currency: string; createdAt: Date }): WalletRow {
   return {
     id: row.id,
-    ownerId: row.ownerId,
+    userId: row.userId,
     currency: 'PEN',
     createdAt: row.createdAt,
   };

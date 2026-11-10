@@ -3,7 +3,7 @@ import { MovementRow, WalletRow } from './types';
 
 export interface WalletDto {
   id: string;
-  ownerId: string;
+  idUsuario: number;
   currency: 'PEN';
   balance: number;
   createdAt: string;
@@ -25,7 +25,7 @@ export interface MovementDto {
 export function toWalletDto(wallet: WalletRow, balance: number): WalletDto {
   return {
     id: wallet.id,
-    ownerId: wallet.ownerId,
+    idUsuario: wallet.userId,
     currency: 'PEN',
     balance,
     createdAt: wallet.createdAt.toISOString(),

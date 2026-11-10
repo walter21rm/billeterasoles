@@ -6,9 +6,10 @@ import { WalletsController } from '../http/wallets.controller';
 import { IdentityModule } from '../identity/identity.module';
 import { PrismaWalletStore } from '../infrastructure/prisma-wallet-store';
 import { OutboxModule } from '../outbox/outbox.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [IdentityModule, OutboxModule],
+  imports: [IdentityModule, OutboxModule, UsersModule],
   controllers: [WalletsController, TransfersController],
   providers: [WalletApplication, { provide: WalletStore, useClass: PrismaWalletStore }],
   exports: [WalletApplication],

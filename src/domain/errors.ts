@@ -28,6 +28,11 @@ export class UnprocessableError extends DomainError {
   readonly title = 'Regla de negocio';
 }
 
+export class UnavailableError extends DomainError {
+  readonly status = 503;
+  readonly title = 'No disponible';
+}
+
 export class IdempotencyRaceError extends Error {
   constructor() {
     super('La clave de idempotencia se está resolviendo');

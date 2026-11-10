@@ -1,5 +1,8 @@
 import { spawnSync } from 'child_process';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { loadConfig } from './infrastructure/config';
@@ -8,8 +11,12 @@ import { PrismaService } from './infrastructure/prisma.service';
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   app.useLogger(app.get(JsonLogger));
+  const webRoot = join(__dirname, '..', 'public');
+  if (existsSync(webRoot)) {
+    app.useStaticAssets(webRoot, { index: 'index.html' });
+  }
   app.enableShutdownHooks();
   await app.get(PrismaService).$queryRaw`SELECT 1`;
   migrate();
@@ -18,7 +25,7 @@ async function bootstrap(): Promise<void> {
     new DocumentBuilder()
       .setTitle('Billetera en soles')
       .setDescription(
-        'Billetera en PEN. Los montos están en céntimos. Los canales la llaman con JWT; los hechos quedan en la tabla outbox. Ver README.',
+        'Billetera en PEN. El titular es id_usuario del servicio de usuarios. Los montos están en céntimos. Ver README.',
       )
       .setVersion('1.0')
       .addBearerAuth()

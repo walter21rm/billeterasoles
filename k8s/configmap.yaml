@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billetera-config
+  namespace: billetera
+data:
+  PORT: "3000"
+  JWT_ISSUER: billetera-dev
+  LOG_LEVEL: info
+  USERS_SERVICE_URL: http://usuarios-ejemplo:3001

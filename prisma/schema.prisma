@@ -10,7 +10,7 @@ datasource db {
 
 model Wallet {
   id        String     @id @default(uuid()) @db.Uuid
-  ownerId   String     @unique @map("owner_id") @db.Uuid
+  userId    Int        @unique @map("id_usuario")
   currency  String     @default("PEN")
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   movements Movement[]

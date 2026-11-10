@@ -3,9 +3,10 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class OpenWalletDto {
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  ownerId!: string;
+  @ApiProperty({ example: 15, description: 'id_usuario del microservicio de usuarios' })
+  @IsInt()
+  @Min(1)
+  idUsuario!: number;
 }
 
 export class AmountDto {
@@ -63,9 +64,11 @@ export class ReverseDto {
 }
 
 export class OwnerQueryDto {
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  ownerId!: string;
+  @ApiProperty({ example: 15, description: 'id_usuario del microservicio de usuarios' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idUsuario!: number;
 }
 
 export class ListMovementsQueryDto {

@@ -4,6 +4,7 @@ import { ValidationError as ClassValidationError } from 'class-validator';
 import { InvalidRequestError } from './domain/errors';
 import { HealthModule } from './health/health.module';
 import { CorrelationMiddleware } from './http/correlation.middleware';
+import { HomeController } from './http/home.controller';
 import { ProblemFilter } from './http/problem.filter';
 import { IdentityModule } from './identity/identity.module';
 import { AppConfigModule } from './infrastructure/config';
@@ -15,6 +16,7 @@ import { WalletsModule } from './wallets/wallets.module';
 
 @Module({
   imports: [AppConfigModule, PrismaModule, IdentityModule, OutboxModule, WalletsModule, MovementsModule, HealthModule],
+  controllers: [HomeController],
   providers: [
     JsonLogger,
     CorrelationMiddleware,

@@ -1,0 +1,790 @@
+openapi: 3.0.3
+
+info:
+  title: Billetera Digital PEN API
+  version: 1.1.0
+  description: |
+    Contrato REST de **Billetera Digital PEN**.
+    Permite abrir una billetera en soles, recargar, cobrar, transferir y reversar movimientos.
+
+    ### Convenciones
+    - Todos los montos se representan como **enteros en centimos** (`1500` = S/ 15.00). Sin floats.
+    - Todas las billeteras operan exclusivamente en **PEN**.
+    - El titular es `idUsuario`, el entero `usuario.id_usuario` del servicio de usuarios.
+    - Los endpoints de escritura requieren **`Idempotency-Key`**.
+    - La misma clave y el mismo cuerpo devuelven el recurso original con HTTP 200.
+    - La misma clave con otro cuerpo responde HTTP 409.
+    - Toda respuesta incluye `X-Correlation-Id`.
+    - Esta API no guarda nombre, correo ni contrasena.
+
+    ### Autenticacion
+    Las rutas de negocio exigen `Authorization: Bearer <JWT>`.
+    Algoritmo HS256. Emisor `billetera-dev`. Secreto de desarrollo `dev-only-change-me`.
+    El claim `sub` es el nombre del servicio que llama (`depositos`, `retiros`, `caja`).
+    `/health` y `/health/ready` no piden token.
+  x-api-version: v1
+  x-currency: PEN-only
+
+servers:
+  - url: http://52.67.162.209
+    description: EC2 publicada en sa-east-1
+  - url: /
+    description: Mismo host que sirve la documentacion
+
+tags:
+  - name: Billetera
+    description: Apertura, saldo, recarga, cobro y transferencia en soles.
+  - name: Movimientos
+    description: Historial y reversa de un movimiento.
+  - name: Health
+    description: Endpoints de salud para orquestadores y probes de Kubernetes.
+
+paths:
+
+  /health:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      tags: [Health]
+      summary: Liveness probe — proceso vivo
+      operationId: healthLive
+      security: []
+      responses:
+        '200':
+          description: El proceso esta vivo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveResponse'
+              example:
+                status: ok
+
+  /health/ready:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      tags: [Health]
+      summary: Readiness probe — listo para operar
+      operationId: healthReady
+      security: []
+      responses:
+        '200':
+          description: El servicio y PostgreSQL estan operativos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                status: ok
+        '503':
+          description: PostgreSQL no esta disponible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /v1/wallets:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    post:
+      tags: [Billetera]
+      summary: Abrir billetera PEN
+      operationId: abrirBilletera
+      description: |
+        Abre la billetera en soles de un `idUsuario`.
+        Antes de crearla consulta `GET {USERS_SERVICE_URL}/usuarios/{idUsuario}`.
+        El usuario debe existir y tener `estado: true`.
+        Reenviar la misma `Idempotency-Key` y el mismo cuerpo devuelve la billetera original.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbrirBilleteraRequest'
+            example:
+              idUsuario: 15
+      responses:
+        '201':
+          description: Billetera creada. Saldo inicial 0.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+        '200':
+          description: Replay — la misma clave ya creo esta billetera.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      tags: [Billetera]
+      summary: Obtener billetera por idUsuario
+      operationId: billeteraPorUsuario
+      parameters:
+        - name: idUsuario
+          in: query
+          required: true
+          description: Entero usuario.id_usuario.
+          schema:
+            type: integer
+            minimum: 1
+          example: 15
+      responses:
+        '200':
+          description: Billetera y saldo actual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+              example:
+                id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                idUsuario: 15
+                currency: PEN
+                balance: 1500
+                createdAt: '2026-10-30T15:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/wallets/{walletId}:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      tags: [Billetera]
+      summary: Obtener billetera por UUID
+      operationId: obtenerBilletera
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+      responses:
+        '200':
+          description: Billetera y saldo actual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/wallets/{walletId}/top-ups:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    post:
+      tags: [Billetera]
+      summary: Recargar soles (deposito)
+      operationId: recargarBilletera
+      description: |
+        Acredita centimos en la billetera. El usuario dueno debe seguir activo.
+        La llama el microservicio de depositos con el mismo JWT, sub depositos.
+        amount va en centimos. Idempotency-Key y externalReference son el id del deposito.
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MontoRequest'
+            example:
+              amount: 1500
+              currency: PEN
+              externalReference: DEP-2026-0001
+      responses:
+        '201':
+          description: Recarga acreditada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Movement'
+        '200':
+          description: Replay de la misma Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Movement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/wallets/{walletId}/payments:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    post:
+      tags: [Billetera]
+      summary: Cobrar soles (retiro)
+      operationId: cobrarBilletera
+      description: |
+        Debita centimos de la billetera.
+        Devuelve 422 si el saldo no alcanza.
+        Es la operacion que llama el microservicio de retiros en soles.
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MontoRequest'
+            example:
+              amount: 500
+              currency: PEN
+              externalReference: RET-2026-0001
+      responses:
+        '201':
+          description: Cobro registrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Movement'
+        '200':
+          description: Replay de la misma Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Movement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/wallets/{walletId}/movements:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      tags: [Movimientos]
+      summary: Historial de movimientos
+      operationId: movimientosBilletera
+      description: Movimientos de la billetera, del mas reciente al mas antiguo.
+      parameters:
+        - $ref: '#/components/parameters/WalletId'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Pagina de movimientos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistorialMovimientos'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/transfers:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    post:
+      tags: [Billetera]
+      summary: Transferir entre billeteras PEN
+      operationId: transferirBilleteras
+      description: |
+        Mueve soles de una billetera a otra en una sola transaccion.
+        Si una parte falla, ninguna cambia.
+        Las dos filas se bloquean en orden de id para evitar interbloqueos.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferenciaRequest'
+            example:
+              sourceWalletId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              targetWalletId: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+              amount: 750
+              externalReference: TRX-2026-0001
+      responses:
+        '201':
+          description: Transferencia ejecutada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferenciaResult'
+        '200':
+          description: Replay de la misma Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferenciaResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/movements/{movementId}/reverse:
+    parameters:
+      - $ref: '#/components/parameters/CorrelationId'
+    post:
+      tags: [Movimientos]
+      summary: Reversar un movimiento
+      operationId: reversarMovimiento
+      description: |
+        Crea un asiento compensatorio por el monto total.
+        No borra el movimiento original.
+        Si el movimiento es una transferencia, reversa las dos patas.
+        Si quien debe devolver el dinero ya no tiene saldo, responde 422.
+      parameters:
+        - $ref: '#/components/parameters/MovementId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReversaRequest'
+            example:
+              reason: error de caja
+      responses:
+        '201':
+          description: Reversa aplicada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReversaResult'
+        '200':
+          description: Replay de la misma Idempotency-Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReversaResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Id de correlacion. Si falta, la API genera uno y lo devuelve.
+      schema:
+        type: string
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Clave unica por intento de escritura. Permite reintentos seguros.
+      schema:
+        type: string
+        maxLength: 200
+      example: 550e8400-e29b-41d4-a716-446655440000
+
+    WalletId:
+      name: walletId
+      in: path
+      required: true
+      description: UUID de la billetera.
+      schema:
+        type: string
+        format: uuid
+      example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+    MovementId:
+      name: movementId
+      in: path
+      required: true
+      description: UUID del movimiento a reversar.
+      schema:
+        type: string
+        format: uuid
+      example: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Registros por pagina (maximo 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256. Emisor billetera-dev. Secreto de desarrollo dev-only-change-me.
+        El claim sub identifica al servicio que llama.
+
+  schemas:
+    AbrirBilleteraRequest:
+      type: object
+      additionalProperties: false
+      required: [idUsuario]
+      properties:
+        idUsuario:
+          type: integer
+          minimum: 1
+          description: usuario.id_usuario del microservicio de usuarios.
+          example: 15
+
+    MontoRequest:
+      type: object
+      additionalProperties: false
+      required: [amount]
+      properties:
+        amount:
+          $ref: '#/components/schemas/Centimos'
+        currency:
+          type: string
+          enum: [PEN]
+          description: Si se envia, debe ser PEN. Si se omite, se asume PEN.
+          example: PEN
+        externalReference:
+          type: string
+          maxLength: 128
+          nullable: true
+          description: Referencia unica por billetera.
+          example: DEP-2026-0001
+
+    TransferenciaRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceWalletId, targetWalletId, amount]
+      properties:
+        sourceWalletId:
+          type: string
+          format: uuid
+          description: Billetera origen.
+        targetWalletId:
+          type: string
+          format: uuid
+          description: Billetera destino. Debe ser distinta de la origen.
+        amount:
+          $ref: '#/components/schemas/Centimos'
+        currency:
+          type: string
+          enum: [PEN]
+        externalReference:
+          type: string
+          maxLength: 128
+          nullable: true
+
+    ReversaRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: error de caja
+
+    Wallet:
+      type: object
+      additionalProperties: false
+      required: [id, idUsuario, currency, balance, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        idUsuario:
+          type: integer
+          example: 15
+        currency:
+          type: string
+          enum: [PEN]
+          example: PEN
+        balance:
+          $ref: '#/components/schemas/Centimos'
+        createdAt:
+          type: string
+          format: date-time
+
+    Movement:
+      type: object
+      additionalProperties: false
+      required: [id, walletId, amount, currency, direction, type, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        walletId:
+          type: string
+          format: uuid
+        amount:
+          $ref: '#/components/schemas/Centimos'
+        currency:
+          type: string
+          enum: [PEN]
+          example: PEN
+        direction:
+          type: string
+          enum: [CREDIT, DEBIT]
+          example: CREDIT
+        type:
+          type: string
+          enum: [TOP_UP, PAYMENT, TRANSFER_OUT, TRANSFER_IN, REVERSAL]
+          example: TOP_UP
+        counterpartyWalletId:
+          type: string
+          format: uuid
+          nullable: true
+        externalReference:
+          type: string
+          nullable: true
+        reversalOf:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    HistorialMovimientos:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Movement'
+        nextCursor:
+          type: string
+          nullable: true
+
+    TransferenciaResult:
+      type: object
+      additionalProperties: false
+      required: [transferId, movements]
+      properties:
+        transferId:
+          type: string
+          format: uuid
+        movements:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/Movement'
+
+    ReversaResult:
+      type: object
+      additionalProperties: false
+      required: [movements]
+      properties:
+        movements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Movement'
+
+    LiveResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReadyResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    Centimos:
+      type: integer
+      minimum: 0
+      maximum: 2147483647
+      description: Monto entero en centimos de sol. 1500 = S/ 15.00. En un cargo debe ser mayor que cero.
+      example: 1500
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance]
+      description: Error RFC 7807.
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+          example: Regla de negocio
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: Saldo insuficiente
+        instance:
+          type: string
+          example: /v1/wallets/3fa85f64-5717-4562-b3fc-2c963f66afa6/payments
+
+  responses:
+    BadRequest:
+      description: Cuerpo o encabezado invalido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Solicitud invalida
+            status: 400
+            detail: El encabezado Idempotency-Key es obligatorio
+            instance: /v1/wallets
+    Unauthorized:
+      description: Falta el JWT o no coincide el emisor o el secreto.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: No autorizado
+            status: 401
+            detail: Token invalido
+            instance: /v1/wallets
+    NotFound:
+      description: No hay billetera, movimiento o usuario.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: No encontrado
+            status: 404
+            detail: El usuario no existe
+            instance: /v1/wallets
+    Conflict:
+      description: El usuario ya tiene una billetera.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Conflicto
+            status: 409
+            detail: El usuario ya tiene una billetera
+            instance: /v1/wallets
+    IdempotencyConflict:
+      description: La misma Idempotency-Key se uso con otro cuerpo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Conflicto
+            status: 409
+            detail: La clave de idempotencia ya se uso con otro cuerpo
+            instance: /v1/wallets
+    UnprocessableEntity:
+      description: Saldo insuficiente, usuario inactivo o reversa imposible.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Regla de negocio
+            status: 422
+            detail: Saldo insuficiente
+            instance: /v1/wallets/3fa85f64-5717-4562-b3fc-2c963f66afa6/payments
+    ServiceUnavailable:
+      description: El servicio de usuarios no respondio.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: No disponible
+            status: 503
+            detail: El servicio de usuarios no responde
+            instance: /v1/wallets
+
+security:
+  - bearerAuth: []

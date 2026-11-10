@@ -23,7 +23,7 @@ export class WalletsController {
   ) {
     return this.wallets
       .open({
-        ownerId: dto.ownerId,
+        userId: dto.idUsuario,
         idempotencyKey: requireIdempotencyKey(key),
         body: dto,
         createdBy: request.user.createdBy,
@@ -37,7 +37,7 @@ export class WalletsController {
   @Get()
   @ApiOkResponse()
   byOwner(@Query() query: OwnerQueryDto) {
-    return this.wallets.getByOwner(query.ownerId);
+    return this.wallets.getByOwner(query.idUsuario);
   }
 
   @Get(':walletId')

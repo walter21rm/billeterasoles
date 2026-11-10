@@ -1,5 +1,7 @@
 node_modules
 dist
+public
+deploy/ssm-params.json
 .env
 coverage
 *.tsbuildinfo

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: usuarios-ejemplo
+  namespace: billetera
+data:
+  server.js: |
+    const http = require("http");
+
+    const users = {
+      15: { idUsuario: 15, estado: true, nombre: "Ana Prueba" },
+      16: { idUsuario: 16, estado: true, nombre: "Luis Prueba" },
+      17: { idUsuario: 17, estado: false, nombre: "Inactivo Prueba" },
+      18: { idUsuario: 18, estado: true, nombre: "Caja Prueba" },
+    };
+
+    const port = Number(process.env.PORT || 3001);
+    const server = http.createServer((request, response) => {
+      const match = /^\/usuarios\/(\d+)$/.exec(request.url.split("?")[0]);
+      response.setHeader("Content-Type", "application/json");
+      if (!match) {
+        response.writeHead(404);
+        response.end(JSON.stringify({ detail: "no existe" }));
+        return;
+      }
+      const user = users[match[1]];
+      if (!user) {
+        response.writeHead(404);
+        response.end(JSON.stringify({ detail: "no existe" }));
+        return;
+      }
+      response.writeHead(200);
+      response.end(JSON.stringify(user));
+    });
+
+    server.listen(port, "0.0.0.0");
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usuarios-ejemplo
+  namespace: billetera
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: usuarios-ejemplo
+  template:
+    metadata:
+      labels:
+        app: usuarios-ejemplo
+    spec:
+      containers:
+        - name: usuarios
+          image: billetera-api:local
+          imagePullPolicy: IfNotPresent
+          command: ["node", "/ejemplo/server.js"]
+          ports:
+            - containerPort: 3001
+              name: http
+          env:
+            - name: PORT
+              value: "3001"
+          volumeMounts:
+            - name: ejemplo
+              mountPath: /ejemplo
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /usuarios/15
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: ejemplo
+          configMap:
+            name: usuarios-ejemplo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: usuarios-ejemplo
+  namespace: billetera
+spec:
+  selector:
+    app: usuarios-ejemplo
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http

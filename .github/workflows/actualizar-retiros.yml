@@ -1,0 +1,124 @@
+name: Actualizar retiros
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Rama o tag del repo de retiros"
+        required: false
+        default: "main"
+  repository_dispatch:
+    types: [retiros-updated]
+
+env:
+  AWS_REGION: sa-east-1
+  ECR_REPO: withdrawal-soles
+  INSTANCE_NAME: billetera-soles
+  RETIROS_REPO: https://github.com/J0sePs/app-microservices-spec.git
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout billetera (manifiestos k8s)
+        uses: actions/checkout@v4
+
+      - name: Resolver ref de retiros
+        id: ref
+        run: |
+          REF="${{ github.event.inputs.ref || github.event.client_payload.ref || 'main' }}"
+          echo "value=$REF" >> "$GITHUB_OUTPUT"
+          echo "Actualizando retiros desde ref=$REF"
+
+      - name: Checkout retiros
+        uses: actions/checkout@v4
+        with:
+          repository: J0sePs/app-microservices-spec
+          ref: ${{ steps.ref.outputs.value }}
+          path: retiros-src}
+
+      - name: Configurar AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Crear repo ECR si falta
+        run: |
+          aws ecr describe-repositories --repository-names "$ECR_REPO" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$ECR_REPO" >/dev/null
+
+      - name: Build y push imagen
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPO:local"
+          docker build -t "$IMAGE" retiros-src
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Buscar instancia EC2
+        id: ec2
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "No hay instancia running llamada $INSTANCE_NAME. Enciende el entorno antes."
+            exit 1
+          fi
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "Instancia: $INSTANCE_ID"
+
+      - name: Preparar manifiesto retiros
+        run: |
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl kustomize k8s/retiros > /tmp/retiros.yaml
+          else
+            # fallback simple si el runner no trae kubectl (ubuntu-latest si)
+            curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x /tmp/kubectl
+            /tmp/kubectl kustomize k8s/retiros > /tmp/retiros.yaml
+          fi
+          ENCODED=$(base64 -w0 /tmp/retiros.yaml)
+          echo "ENCODED_YAML=$ENCODED" >> "$GITHUB_ENV"
+
+      - name: Redeploy por SSM
+        env:
+          INSTANCE_ID: ${{ steps.ec2.outputs.instance_id }}
+        run: |
+          cat > /tmp/remote.sh <<EOF
+          set -euxo pipefail
+          PASS=\$(aws ecr get-login-password --region $AWS_REGION)
+          k3s ctr images pull --user "AWS:\$PASS" $IMAGE
+          k3s ctr images tag $IMAGE docker.io/library/withdrawal-soles:local
+          mkdir -p /opt/billetera/k8s
+          printf '%s' '$ENCODED_YAML' | base64 -d > /opt/billetera/k8s/retiros.yaml
+          k3s kubectl apply -f /opt/billetera/k8s/retiros.yaml
+          k3s kubectl -n retiros rollout restart deploy/retiros-api deploy/retiros-dependencias
+          k3s kubectl -n retiros rollout status deploy/retiros-postgres --timeout=180s
+          k3s kubectl -n retiros rollout status deploy/retiros-dependencias --timeout=180s
+          k3s kubectl -n retiros rollout status deploy/retiros-api --timeout=240s
+          k3s kubectl -n retiros get pods
+          EOF
+
+          jq -n --rawfile c /tmp/remote.sh '{commands:[($c|rtrimstr("\n"))]}' > /tmp/ssm-params.json
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters "file:///tmp/ssm-params.json" \
+            --query Command.CommandId --output text)
+
+          echo "SSM CommandId=$COMMAND_ID"
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query Status --output text)
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query StandardErrorContent --output text
+          test "$STATUS" = "Success"

@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retiros
+  namespace: retiros
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api/v1/withdrawals
+            pathType: Prefix
+            backend:
+              service:
+                name: retiros-api
+                port:
+                  number: 8000

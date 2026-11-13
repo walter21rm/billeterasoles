@@ -2,6 +2,7 @@ node_modules
 dist
 public
 deploy/ssm-params.json
+deploy/ssm-params-retiros.json
 .env
 coverage
 *.tsbuildinfo

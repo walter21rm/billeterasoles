@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retiros-dependencias
+  namespace: retiros
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retiros-dependencias
+  template:
+    metadata:
+      labels:
+        app: retiros-dependencias
+    spec:
+      containers:
+        - name: dependencias
+          image: docker.io/library/withdrawal-soles:local
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "tools.mock_dependencies:app", "--host", "0.0.0.0", "--port", "8001"]
+          ports:
+            - containerPort: 8001
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retiros-dependencias
+  namespace: retiros
+spec:
+  selector:
+    app: retiros-dependencias
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retiros-postgres
+  namespace: retiros
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retiros-postgres
+  template:
+    metadata:
+      labels:
+        app: retiros-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: retiros-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: retiros-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: retiros-secret
+                  key: POSTGRES_DB
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "withdrawal", "-d", "withdrawal_soles_db"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: retiros-postgres-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retiros-postgres-data
+  namespace: retiros
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retiros-postgres
+  namespace: retiros
+spec:
+  selector:
+    app: retiros-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

@@ -1,0 +1,30 @@
+# Copia este archivo en el repo de retiros como:
+#   .github/workflows/avisar-billetera.yml
+#
+# En GitHub del DUEÑO de billeterasoles crea un Personal Access Token (classic)
+# con scope "repo" y guárdalo como secret en el repo de retiros:
+#   BILLETERA_DISPATCH_TOKEN
+#
+# Opcional: también puedes pasar ref distinta en client_payload.
+
+name: Avisar billetera (redeploy retiros)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar actualizar-retiros en billeterasoles
+        env:
+          GH_TOKEN: ${{ secrets.BILLETERA_DISPATCH_TOKEN }}
+        run: |
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/walter21rm/billeterasoles/dispatches \
+            -d "{\"event_type\":\"retiros-updated\",\"client_payload\":{\"ref\":\"${GITHUB_REF_NAME}\"}}"

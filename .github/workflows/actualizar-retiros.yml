@@ -9,6 +9,9 @@ on:
         default: "main"
   repository_dispatch:
     types: [retiros-updated]
+  # Si el otro equipo aún no tiene el trigger, esto revisa su main cada 15 min.
+  schedule:
+    - cron: "*/15 * * * *"
 
 env:
   AWS_REGION: sa-east-1

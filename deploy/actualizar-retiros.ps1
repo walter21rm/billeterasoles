@@ -35,11 +35,13 @@ Write-Output "Construyendo withdrawal-soles desde $Ref..."
 docker build -t withdrawal-soles:local $Work
 if ($LASTEXITCODE -ne 0) { throw "Fallo el build de retiros." }
 
+$ErrorActionPreference = "Continue"
 aws ecr describe-repositories --repository-names $EcrRepo *> $null
 if ($LASTEXITCODE -ne 0) {
   aws ecr create-repository --repository-name $EcrRepo | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "No se pudo crear el repositorio ECR $EcrRepo." }
 }
+$ErrorActionPreference = "Stop"
 
 $dockerConfigPath = Join-Path $env:USERPROFILE ".docker\config.json"
 $utf8 = New-Object System.Text.UTF8Encoding $false
